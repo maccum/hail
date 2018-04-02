@@ -104,4 +104,6 @@ class GridPartitionerSuite extends TestNGSuite {
       assert(gp.rectangularBlocks(0, 20, 0, 30) sameElements (0 until 12))
     }
   }
+
+  
 }

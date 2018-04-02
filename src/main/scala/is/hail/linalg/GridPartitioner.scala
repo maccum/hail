@@ -87,4 +87,86 @@ case class GridPartitioner(blockSize: Int, nRows: Long, nCols: Long) extends Par
     scala.util.Sorting.quickSort(rects)
     rects
   }
+
+  // returns array of blocks intersecting the upper triangular portion of the square defined by the given columns
+  def triangularBlocks(firstColumn: Long, lastColumn: Long): Array[Int] = {
+    if (nRows != nCols) {
+      fatal(s"Expected square block matrix, but found block matrix with $nRows rows and $nCols columns.")
+    }
+
+    require(firstColumn <= lastColumn && firstColumn >=0 && lastColumn<=nCols)
+
+    val lo = blockIndex(firstColumn)
+    val hi = blockIndex(lastColumn)
+
+    val upperBlockBandwidth = hi - lo
+
+    (for {j <- lo to hi
+    i <- ((j - upperBlockBandwidth) max lo) to (j min hi)
+    } yield (j * nBlockRows) + i).toArray
+  }
+
+  // returns array of all blocks intersecting the upper triangles of a square matrix
+  def triangularBlocks(triangles: Array[Array[Long]]): Array[Int] = {
+    if (nRows != nCols) {
+      fatal(s"Expected square block matrix, but found block matrix with $nRows rows and $nCols columns.")
+    }
+    require(triangles.forall(t => t.length == 2 && t(0) <= t(1)))
+    val tris = triangles.foldLeft(Set[Int]()) { (s, t) => s ++ triangularBlocks(t(0), t(1)) }.toArray
+    scala.util.Sorting.quickSort(tris)
+    tris
+  }
+
+  def squareBlocks(squares: Array[Array[Long]], aboveDiagonalOnly: Boolean): Array[Int] = {
+    if (nRows != nCols) {
+      fatal(s"Expected square block matrix, but found block matrix with $nRows rows and $nCols columns.")
+    }
+    // overlapping squares should be separated into non-overlapping squares and rectangles
+    require(squares.forall(sq => sq.length==2))
+    var rectangles = Array[Array[Long]]()
+    val sqs = squares.foldLeft(Array[Array[Long]]()) {
+      (s, el) => {
+        if (s.isEmpty) {
+          s ++ Array(el)
+        } else {
+          val previous = s.head
+          if (el(1) <= previous(1)) {
+            // intervals overlap
+            val (sqs, rects) = breakUpOverlappingSquares(previous(0), previous(1), el(0), el(1), aboveDiagonalOnly)
+            require(rects.forall(r => r.length == 4) && sqs.forall(s => s.length == 2))
+            rectangles = rectangles ++ rects
+            s.tail ++ sqs
+          } else {
+            s ++ Array(el)
+          }
+        }
+      }
+    }
+
+    if (aboveDiagonalOnly) {
+      triangularBlocks(sqs) ++ rectangularBlocks(rectangles)
+    } else {
+      rectangularBlocks(sqs.map(sq => Array(sq(0), sq(1), sq(0), sq(1)))) ++ rectangularBlocks(rectangles)
+    }
+  }
+
+  /*Break overlapping squares (a,b) and (c,d) into squares (a,c-1), (c,b), (b+1,d) and
+  rectangles (c, b, a, c-1), (a, c-1, c, b), (b+1, d, c, b), (c, b, b+1, d) */
+  def breakUpOverlappingSquares(a: Long, b: Long, c: Long, d: Long, aboveDiagonalOnly: Boolean):
+  (Array[Array[Long]], Array[Array[Long]]) = {
+
+    require(c <= b) // squares must overlap
+
+    val (squareA, squareB, squareC) = (Array(a, c-1), Array(c, b), Array(b+1, d))
+
+    val squares = Array(squareA, squareB, squareC)
+    val rectangles =
+      if (aboveDiagonalOnly) {
+        Array(squareA ++ squareB, squareB ++ squareC)
+      } else {
+        Array(squareB ++ squareA, squareA ++ squareB, squareC ++ squareB, squareB ++ squareC)
+      }
+
+    (squares, rectangles)
+  }
 }
