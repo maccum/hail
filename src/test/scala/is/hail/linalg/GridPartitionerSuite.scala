@@ -105,5 +105,61 @@ class GridPartitionerSuite extends TestNGSuite {
     }
   }
 
+  @Test
+  def triangularBlocksTest() {
+    // 0 4 8 12
+    // 1 5 9 13
+    // 2 6 10 14
+    // 3 7 11 15
+    val gp = GridPartitioner(blockSize = 10, nRows = 40, nCols = 40)
+
+    val intervals: Array[Array[Long]] = Array(Array(0, 3), Array(4, 9), Array(10, 11),
+      Array(12, 20), Array(23, 30), Array(31, 33), Array(35, 39))
+
+    assert(gp.triangularBlocks(12, 20) sameElements Array(5, 9, 10))
+    assert(gp.triangularBlocks(intervals) sameElements Array(0, 5, 9, 10, 14, 15))
+  }
+
+  @Test
+  def triangularBlocksTestWithBlockSizeOfOne() {
+    // 0 6  12 18 24 30
+    // 1 7  13 19 25 31
+    // 2 8  14 20 26 32
+    // 3 9  15 21 27 33
+    // 4 10 16 22 28 34
+    // 5 11 17 23 29 35
+
+    val gp = GridPartitioner(blockSize = 1, nRows = 6, nCols = 6)
+
+    val intervals: Array[Array[Long]] = Array(Array(0, 1), Array(2, 3), Array(4, 5))
+
+    assert(gp.triangularBlocks(intervals) sameElements Array(0, 6, 7, 14, 20, 21, 28, 34, 35))
+  }
+
+  @Test
+  def testBreakUpOverlappingSquares() {
+    val gp = GridPartitioner(blockSize = 1, nRows = 6, nCols = 6)
+    val (squares, rectangles) = gp.breakUpOverlappingSquares(0, 1, 1, 2, aboveDiagonalOnly = false)
+    assert(squares.deep == Array(Array(0, 0), Array(1, 1), Array(2, 2)).deep)
+    assert(rectangles.deep == Array(Array(1, 1, 0, 0), Array(0, 0, 1, 1), Array(2, 2, 1, 1), Array(1, 1, 2, 2)).deep)
+  }
+
+  @Test
+  def testSquareBlocksAboveAndBelowDiagonal() {
+    // 0 6  12 18 24 30
+    // 1 7  13 19 25 31
+    // 2 8  14 20 26 32
+    // 3 9  15 21 27 33
+    // 4 10 16 22 28 34
+    // 5 11 17 23 29 35
+
+    val gp = GridPartitioner(blockSize = 1, nRows = 6, nCols = 6)
+
+    assert(gp.squareBlocks(Array(Array(0, 1), Array(1, 3), Array(2, 5)), aboveDiagonalOnly = false) sameElements
+      Array(0, 1, 6, 7, 8, 9, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 26, 27, 28, 29, 32, 33, 34, 35))
+
+    assert(gp.squareBlocks(Array(Array(0, 1), Array(1, 3), Array(2, 5)), aboveDiagonalOnly = true) sameElements
+      Array(0, 6, 7, 13, 14, 19, 20, 21, 26, 27, 28, 32, 33, 34, 35))
+  }
   
 }

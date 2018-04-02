@@ -2,6 +2,8 @@ package is.hail.linalg
 
 import org.apache.spark.Partitioner
 import breeze.linalg.{DenseVector => BDV}
+import is.hail.utils.fatal
+
 
 case class GridPartitioner(blockSize: Int, nRows: Long, nCols: Long) extends Partitioner {
   require(nRows > 0 && nRows <= Int.MaxValue.toLong * blockSize)
