@@ -2909,6 +2909,28 @@ class FilterAlleles(object):
                 self._left_aligned, self._keep_star))
         return cleanup(m)
 
+
+class TimeHelper(object):
+
+    def __init__(self):
+        import timeit
+        self.start_time = timeit.default_timer()
+        self.previous_time = self.start_time
+        self.total_time = 0
+        self.time_string = "TIME:"
+
+    def log_time(self, message):
+        import timeit
+        time_to_here = timeit.default_timer() - self.previous_time
+        self.total_time = self.total_time + time_to_here
+        self.previous_time = timeit.default_timer()
+        self.time_string += "\n"+message+" : "+format(time_to_here, '.2f')+" seconds"
+
+    def print_time(self):
+        self.time_string += "\nTotal Time : "+format(self.total_time, '.2f')+"seconds"
+        print(self.time_string)
+
+
 @typecheck(ds=MatrixTable,
            r2=numeric,
            window=int,
@@ -2944,6 +2966,9 @@ def ld_prune(ds, r2=0.2, window=1000000, memory_per_core=256):
     :class:`.Table`
         Table of variants after pruning.
     """
+    timer = TimeHelper()
+    
+
     bytes_per_core = memory_per_core * 1024 * 1024
     fraction_memory_to_use = 0.25
     variant_byte_overhead = 50
@@ -2961,6 +2986,7 @@ def ld_prune(ds, r2=0.2, window=1000000, memory_per_core=256):
 
     sites_path = new_temp_file()
     sites_only_table.write(sites_path, overwrite=True)
+    timer.log_time("Local prune")
     sites_only_table = hl.read_table(sites_path)
 
     locally_pruned_ds = ds.annotate_rows(pruned=sites_only_table[ds.row_key])
@@ -2972,6 +2998,7 @@ def ld_prune(ds, r2=0.2, window=1000000, memory_per_core=256):
 
     locally_pruned_path = new_temp_file()
     locally_pruned_ds.write(locally_pruned_path, overwrite=True)
+    timer.log_time("Filter matrix to locally pruned things:")
     locally_pruned_ds = hl.read_matrix_table(locally_pruned_path)
 
     normalized_mean_imputed_genotype_expr = (
@@ -2981,6 +3008,7 @@ def ld_prune(ds, r2=0.2, window=1000000, memory_per_core=256):
 
     # BlockMatrix.from_entry_expr writes to disk
     block_matrix = BlockMatrix.from_entry_expr(normalized_mean_imputed_genotype_expr, block_size=512)
+    timer.log_time("Block Matrix")
     correlation_matrix = (block_matrix @ (block_matrix.T))
 
     entries = Table(correlation_matrix._jbm.filteredEntriesTable(
@@ -2989,6 +3017,7 @@ def ld_prune(ds, r2=0.2, window=1000000, memory_per_core=256):
     ))
     entries_path = new_temp_file()
     entries.write(entries_path, overwrite=True)
+    timer.log_time("Entries table and correlation matrix")
     entries = hl.read_table(entries_path)
 
     entries = entries.filter((entries.entry ** 2 >= r2) & (entries.i != entries.j) & (entries.i < entries.j))
@@ -3005,6 +3034,8 @@ def ld_prune(ds, r2=0.2, window=1000000, memory_per_core=256):
         hl.is_defined(related_nodes_to_remove[locally_pruned_ds.row_idx]), keep=False)
 
     info("LD prune step 2 of 2: nVariantsKept={}".format(pruned_ds.count_rows()))
+    timer.log_time("Annotate entries table, and filter with MIS")
+    timer.print_time()
     return pruned_ds.rows().select('locus', 'alleles')
 
 

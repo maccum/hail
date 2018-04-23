@@ -1404,6 +1404,16 @@ class Tests(unittest.TestCase):
         pruned_table = hl.ld_prune(ds)
         assert (pruned_table.count() == 1)
 
+    def test_ld_prune_12000(self):
+        ds = hl.read_matrix_table('/Users/maccum/test_data/12000vds.vds')
+        pruned_table = hl.ld_prune(ds)
+        pruned_table.show()
+
+    def test_ld_prune_big(self):
+        ds = hl.read_matrix_table('/Users/maccum/test_data/profile.vds')
+        pruned_table = hl.ld_prune(ds)
+        pruned_table.show()
+
     def test_entries_table(self):
         n_rows, n_cols = 5, 3
         rows = [{'i': i, 'j': j, 'entry': float(i + j)} for i in range(n_rows) for j in range(n_cols)]
