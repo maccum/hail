@@ -13,6 +13,39 @@ import is.hail.variant.{MatrixTable, VSMSubgen}
 import org.apache.spark.sql.Row
 
 class GroupBySuite extends SparkSuite {
+  
+  @Test def testGroupBy() {
+    var vds = hc.importVCF("src/test/resources/sample.vcf")
+      .indexCols("cidx").indexRows("ridx")
+      .filterColsExpr("sa.cidx.toInt64() < 3.toInt64()").filterRowsExpr("va.ridx < 3.toInt64()")
+      .selectRows("{locus: va.locus, alleles: va.alleles, ridx: va.ridx}")
+      //.annotateColsExpr("AC"-> "AGG.map(g=>g.GT.nNonRefAlleles()).sum()")
+      .annotateEntriesExpr("gtIsHet"->" g.GT.isHet()")
+      .annotateRowsExpr("nHetByRow"->"AGG.filter(g => g.gtIsHet).count()")
+      .annotateColsExpr("nHetByCol"->"AGG.filter(g => g.gtIsHet).count()")
+      .selectEntries("{gtIsHet: g.gtIsHet, GT: g.GT}")
+      
+    def printInfo(mt: MatrixTable) = {
+      println("mt:\nRow Signature:"+mt.rowType+"\nCol Signature:"+mt.colType+
+      "\nglobalSig:"+mt.globalType+"\nentrySig:"+mt.entryType)
+      
+      println("rvRowTYpe: "+mt.rvRowType)
+      println("RowsTable:\n")
+      mt.rowsTable().show()
+      println("Cols Table")
+      mt.colsTable().show(mt.numCols)
+      println("Entry Table")
+      mt.entriesTable().show()
+
+      println("Counts: Row:"+mt.countRows()+" Cols:"+mt.numCols+" Entries:"+mt.entriesTable().count())
+    }
+    printInfo(vds)
+    
+    
+    //val grp = vds.groupColsBy("AC = sa.AC", "max = AGG.map(g => g.GT.nNonRefAlleles()).max()")
+    val grp = vds.groupColsBy("cidx = sa.cidx", "count = AGG.filter(g => g.GT.isHet()).count()")
+    printInfo(grp)
+  }
 
   @Test def testGroupSamplesBy() {
     val vds = hc.importVCF("src/test/resources/sample.vcf").annotateColsExpr("AC" -> "AGG.map(g => g.GT.nNonRefAlleles()).sum()")
