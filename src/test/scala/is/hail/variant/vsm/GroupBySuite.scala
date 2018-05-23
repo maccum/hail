@@ -17,7 +17,7 @@ class GroupBySuite extends SparkSuite {
 
   @Test def testAggregateColumnsByKeyOnSmallExample() {
     val mt = MatrixTable.range(hc, nRows = 5, nCols = 4, None).annotateColsExpr("group" -> "sa.col_idx%2==0")
-      .annotateEntriesExpr("x" -> "sa.col_idx+va.row_idx")
+      .annotateEntriesExpr("x" -> "(sa.col_idx+va.row_idx).toInt64()")
 
     val result = mt.keyColsBy("group")
       .aggregateColsByKey("{sum: AGG.map(g=>g.x).sum(), min: AGG.map(g=>g.x).min()}")
