@@ -7,7 +7,7 @@ import is.hail.check.Gen
 import is.hail.linalg._
 import is.hail.expr._
 import is.hail.expr.ir
-import is.hail.expr.ir.{ContainsAgg, InsertFields}
+import is.hail.expr.ir.{ContainsAgg, IR, InsertFields}
 import is.hail.methods._
 import is.hail.rvd._
 import is.hail.table.{Table, TableSpec}
@@ -769,6 +769,61 @@ class MatrixTable(val hc: HailContext, val ast: MatrixIR) {
   }
 
   def collectColsByKey(): MatrixTable = new MatrixTable(hc, CollectColsByKey(ast))
+  
+  def aggregateColsByKeyThroughIR(ir: IR): MatrixTable = {
+    new MatrixTable(hc, MatrixAggregateColsByKey(ast, ir))
+  }
+
+  def aggregateColsByKeyThroughAST(ec: EvalContext, aggExpr: String): MatrixTable = {
+
+    val newColType = TStruct(colKey.map(k => (colType.field(k).name, colType.field(k).typ)): _*)
+
+    val keyIndices = colKey.map(k => colType.field(k).index)
+
+    val sEC = EvalContext(Map(Annotation.GLOBAL_HEAD -> (0, globalType),
+      Annotation.COL_HEAD -> (1, colType)))
+
+    sEC.set(0, globals.value)
+    val keysBySample = colValues.value.map { sa =>
+      sEC.set(1, sa)
+      Row.fromSeq(keyIndices.map(sa.asInstanceOf[Row].get))
+    }
+
+    val newKeys = keysBySample.toSet.toArray
+    val keyMap = newKeys.zipWithIndex.toMap
+    val samplesMap = keysBySample.map { k => if (k == null) -1 else keyMap(k) }.toArray
+
+    val nKeys = newKeys.length
+
+    val (t, f) = Parser.parseExpr(aggExpr, ec)
+    val newEntryType = coerce[TStruct](t)
+
+    val aggregate = Aggregators.buildRowAggregationsByKey(this, nKeys, samplesMap, ec)
+
+    insertEntries(noOp,
+      newColType = newColType,
+      newColValues = colValues.copy(value = newKeys, t = TArray(newColType)),
+      newColKey = colKey)(newEntryType, { case (_, rv, rvb) =>
+
+      val aggArr = aggregate(rv)
+      rvb.startArray(nKeys)
+
+      var i = 0
+      while (i < nKeys) {
+        aggArr(i)()
+        rvb.startStruct()
+        val fields = f().asInstanceOf[Row]
+        var j = 0
+        while (j < fields.length) {
+          rvb.addAnnotation(newEntryType.types(j), fields(j))
+          j += 1
+        }
+        rvb.endStruct()
+        i += 1
+      }
+      rvb.endArray()
+    }) 
+  }
 
   def aggregateColsByKey(aggExpr: String): MatrixTable = {
     val ec = rowEC
@@ -777,57 +832,11 @@ class MatrixTable(val hc: HailContext, val ast: MatrixIR) {
     
     aggAST.toIROpt(Some("AGG" -> "g")) match {
       case Some(ir) if useIR(this.colAxis, aggAST) =>
-        new MatrixTable(hc, MatrixAggregateColsByKey(ast, ir))
+        //new MatrixTable(hc, MatrixAggregateColsByKey(ast, ir))
+        aggregateColsByKeyThroughIR(ir)
       case _ =>
         log.warn(s"group_cols_by(...).aggregate() found no AST to IR conversion: ${ PrettyAST(aggAST) }")
-
-        val newColType = TStruct(colKey.map(k => (colType.field(k).name, colType.field(k).typ)): _*)
-
-        val keyIndices = colKey.map(k => colType.field(k).index)
-
-        val sEC = EvalContext(Map(Annotation.GLOBAL_HEAD -> (0, globalType),
-          Annotation.COL_HEAD -> (1, colType)))
-
-        sEC.set(0, globals.value)
-        val keysBySample = colValues.value.map { sa =>
-          sEC.set(1, sa)
-          Row.fromSeq(keyIndices.map(sa.asInstanceOf[Row].get))
-        }
-
-        val newKeys = keysBySample.toSet.toArray
-        val keyMap = newKeys.zipWithIndex.toMap
-        val samplesMap = keysBySample.map { k => if (k == null) -1 else keyMap(k) }.toArray
-
-        val nKeys = newKeys.length
-
-        val (t, f) = Parser.parseExpr(aggExpr, ec)
-        val newEntryType = coerce[TStruct](t)
-
-        val aggregate = Aggregators.buildRowAggregationsByKey(this, nKeys, samplesMap, ec)
-
-        insertEntries(noOp,
-          newColType = newColType,
-          newColValues = colValues.copy(value = newKeys, t = TArray(newColType)),
-          newColKey = colKey)(newEntryType, { case (_, rv, rvb) =>
-
-          val aggArr = aggregate(rv)
-          rvb.startArray(nKeys)
-
-          var i = 0
-          while (i < nKeys) {
-            aggArr(i)()
-            rvb.startStruct()
-            val fields = f().asInstanceOf[Row]
-            var j = 0
-            while (j < fields.length) {
-              rvb.addAnnotation(newEntryType.types(j), fields(j))
-              j += 1
-            }
-            rvb.endStruct()
-            i += 1
-          }
-          rvb.endArray()
-        })
+        aggregateColsByKeyThroughAST(ec, aggExpr)
     }
   }
 

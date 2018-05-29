@@ -1391,6 +1391,30 @@ class GroupedMatrixTests(unittest.TestCase):
         self.assertEqual(b.count_cols(), 6)
         self.assertTrue('group5' in b.col_key)
 
+    def test_group_cols_by(self):
+        mt = hl.utils.range_matrix_table(n_rows=5, n_cols=4)
+        mt = mt.annotate_cols(group=(mt.col_idx % 2 == 0))
+        mt = mt.annotate_entries(x=(mt.col_idx+mt.row_idx))
+        result = mt.group_cols_by(mt.group).aggregate(sum=hl.agg.sum(mt.x),
+                                                      min=hl.agg.min(mt.x))
+
+        schema = hl.tstruct(row_idx=hl.tint32, group=hl.tbool, sum=hl.tint64, min=hl.tint32)
+        rows = [{'row_idx': 0, 'group': True, 'sum': 2, 'min': 0},
+                {'row_idx': 0, 'group': False, 'sum': 4, 'min': 1},
+                {'row_idx': 1, 'group': True, 'sum': 4, 'min': 1},
+                {'row_idx': 1, 'group': False, 'sum': 6, 'min': 2},
+                {'row_idx': 2, 'group': True, 'sum': 6, 'min': 2},
+                {'row_idx': 2, 'group': False, 'sum': 8, 'min': 3},
+                {'row_idx': 3, 'group': True, 'sum': 8, 'min': 3},
+                {'row_idx': 3, 'group': False, 'sum': 10, 'min': 4},
+                {'row_idx': 4, 'group': True, 'sum': 10, 'min': 4},
+                {'row_idx': 4, 'group': False, 'sum': 12, 'min': 5}]
+        expected_entries_table = hl.Table.parallelize(rows, schema).key_by('row_idx', 'group')
+
+        result.entries().show(10)
+        expected_entries_table.show(10)
+
+        self.assertTrue(result.entries()._same(expected_entries_table))
 
 
 class FunctionsTests(unittest.TestCase):
