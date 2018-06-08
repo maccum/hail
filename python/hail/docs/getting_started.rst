@@ -4,6 +4,10 @@
 Getting Started
 ===============
 
+.. note:: Which version of Hail should you use?
+    These instructions are for Hail 0.1. New users are encouraged to start with Hail 0.2. The instructions
+    for getting started with Hail 0.2 can be found `here <https://hail.is/docs/devel/getting_started.html>`_.
+
 You'll need:
 
 - The `Java 8 JDK <http://www.oracle.com/technetwork/java/javase/downloads/index.html>`_.
