@@ -100,6 +100,22 @@ def init(doctest_namespace):
     doctest_namespace['ht'] = hl.import_table("data/kt_example1.tsv", impute=True)
     doctest_namespace['mt'] = ds
 
+    # Joins Guide
+    doctest_namespace['left'] = hl.Table.parallelize([
+        {'k': 0, 'x': 10},
+        {'k': 1, 'x': 12},
+        {'k': 1, 'x': 2},
+        {'k': 2, 'x': 5}],
+        hl.tstruct(k=hl.tint32, x=hl.tint32),
+        key='k')
+    doctest_namespace['right'] = hl.Table.parallelize([
+        {'id': 1, 'y': .5},
+        {'id': 2, 'y': .13},
+        {'id': 2, 'y': -.01},
+        {'id': 3, 'y': .07}],
+        hl.tstruct(id=hl.tint32, y=hl.tfloat32),
+        key='id')
+
     gnomad_data = ds.rows()
     doctest_namespace['gnomad_data'] = gnomad_data.select(gnomad_data.info.AF)
 

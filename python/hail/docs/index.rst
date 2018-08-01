@@ -15,6 +15,7 @@ Contents
     Tutorials <tutorials-landing>
     Hail Overview <overview>
     Python API <api>
+    How-To Guides <guides>
     For Software Developers <soft_dev_instructions>
     Other Resources <other_resources>
 
