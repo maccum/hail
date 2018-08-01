@@ -100,6 +100,46 @@ def init(doctest_namespace):
     doctest_namespace['ht'] = hl.import_table("data/kt_example1.tsv", impute=True)
     doctest_namespace['mt'] = ds
 
+    # Joins Guide
+    doctest_namespace['left'] = hl.Table.parallelize([
+        {'k': 0, 'x': 10},
+        {'k': 1, 'x': 12},
+        {'k': 1, 'x': 2},
+        {'k': 2, 'x': 5}],
+        hl.tstruct(k=hl.tint32, x=hl.tint32),
+        key='k')
+    doctest_namespace['right'] = hl.Table.parallelize([
+        {'id': 1, 'y': .5},
+        {'id': 2, 'y': .13},
+        {'id': 2, 'y': -.01},
+        {'id': 3, 'y': .07}],
+        hl.tstruct(id=hl.tint32, y=hl.tfloat32),
+        key='id')
+    doctest_namespace['mt1'] = hl.Table.parallelize(
+        [{'v': "v1", 'u': "u1", 's': "s1", 't': "t8", 'e': 1},
+         {'v': "v1", 'u': "u1", 's': "s1", 't': "t9", 'e': 2},
+         {'v': "v1", 'u': "u1", 's': "s2", 't': "t7", 'e': 3},
+         {'v': "v1", 'u': "u1", 's': "s2", 't': "t8", 'e': 4},
+         {'v': "v1", 'u': "u1", 's': "s2", 't': "t9", 'e': 5},
+
+         {'v': "v1", 'u': "u2", 's': "s1", 't': "t8", 'e': 6},
+         {'v': "v1", 'u': "u2", 's': "s1", 't': "t9", 'e': 7},
+         ], hl.tstruct(v=hl.tstr, u=hl.tstr, s=hl.tstr, t=hl.tstr,
+                       e=hl.tint32)).to_matrix_table(['v', 'u'], ['s', 't'])
+    doctest_namespace['mt2'] = hl.Table.parallelize(
+        [{'v': "v1", 'u': "u2", 's': "s1", 't': "t8", 'e': 6},
+         {'v': "v1", 'u': "u2", 's': "s1", 't': "t9", 'e': 7},
+         {'v': "v1", 'u': "u2", 's': "s2", 't': "t7", 'e': 8},
+         {'v': "v1", 'u': "u2", 's': "s2", 't': "t8", 'e': 9},
+         {'v': "v1", 'u': "u2", 's': "s2", 't': "t9", 'e': 10},
+
+         {'v': "v1", 'u': "u3", 's': "s1", 't': "t8", 'e': 11},
+         {'v': "v1", 'u': "u3", 's': "s1", 't': "t9", 'e': 12},
+         {'v': "v1", 'u': "u3", 's': "s2", 't': "t7", 'e': 13},
+         ],
+        hl.tstruct(v=hl.tstr, u=hl.tstr, s=hl.tstr, t=hl.tstr,
+                   e=hl.tint32)).to_matrix_table(['v', 'u'], ['s', 't'])
+
     gnomad_data = ds.rows()
     doctest_namespace['gnomad_data'] = gnomad_data.select(gnomad_data.info.AF)
 
