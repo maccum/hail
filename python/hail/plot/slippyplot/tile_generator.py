@@ -1,0 +1,272 @@
+import signal
+import datetime
+import os
+import matplotlib.pyplot as plt
+
+import hail as hl
+from hail.plot.slippyplot.zone import Zone, Zones
+
+
+class TileGenerator(object):
+
+    def __init__(self,
+                 mt,
+                 dest,
+                 empty_tile_path='/Users/maccum/manhattan_data/empty_tile.png',
+                 log_path='plot_generation.log',
+                 regen=False,
+                 x_margin=10,
+                 y_margin=5):
+        """
+        TileGenerator for tiles (.png images) that compose a plot.
+
+
+        :param mt:
+        :param dest: destination folder
+        :param empty_tile_path: path to image of empty tile (whitespace)
+        :param log_path: path to logging file
+        :param regen: True if tiles with existing files should be regenerated
+        :param x_margin: additional space to show on graph outside x range
+        :param y_margin: additional space to show on graph outside y range
+        """
+
+        self.check_schema(mt)
+
+        self.mt = mt
+        self.dest = dest
+        if not empty_tile_path:
+            self.empty_tile_path = self.dest + "/" + "empty_tile.png"
+            self.generate_plot(empty_tile_path, [], [], [], [], [])
+        else:
+            self.empty_tile_path = empty_tile_path
+        self.log_path = log_path
+        self.log = None
+        self.regen = regen
+
+        # if x and y margins are set to 0, then the graph's boundaries
+        # will be exactly equal to the x and y ranges of the plotted data
+        self.x_margin = x_margin
+        self.y_margin = y_margin
+
+        # empty zones are used to avoid filtering to a region we know is empty
+        self.empty_zones = Zones()
+
+    # helper function for converting global_position to local pixel coordinates
+    @staticmethod
+    def map_value_onto_range(value, old_range, new_range):
+        old_span = old_range[1] - old_range[0]
+        new_span = new_range[1] - new_range[0]
+        distance_to_value = value - old_range[0]
+        percent_span_to_value = distance_to_value / old_span
+        distance_to_new_value = percent_span_to_value * new_span
+        new_value = new_range[0] + distance_to_new_value
+        return new_value
+
+    @staticmethod
+    def check_schema(mt):
+        # TODO: probably exists a hail util to do this
+        row_fields = list(mt.row)
+        col_fields = list(mt.col)
+        entry_fields = list(mt.entry)
+        global_fields = list(mt.globals)
+
+        desired_row = ['global_position', 'color']
+        desired_col = ['phenotype', 'max_nlp', 'min_nlp']
+        desired_entry = ['neg_log_pval']
+        desired_globals = ['gp_range']
+
+        def check_fields(desired, actual, msg):
+            for field in desired:
+                if field not in actual:
+                    raise ValueError(f"For {msg} schema: expected {desired} "
+                                     f"but found {actual}")
+
+        (check_fields(desired_row, row_fields, "row")
+         and check_fields(desired_col, col_fields, "col")
+         and check_fields(desired_entry, entry_fields, "entry")
+         and check_fields(desired_globals, global_fields, "global"))
+
+    @staticmethod
+    def date():
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # run with hail in quiet mode for progress bar to print without re-printing
+    # prints progress of tile generation for a layer
+    # TODO: probably delete
+    @staticmethod
+    def progress(i, total, prefix='Zoom Level', suffix='Complete',
+                 decimals=1, length=50, fill='█'):
+        # https://stackoverflow.com/questions/3173320/text-progress-bar-in-the-console
+        percent = ("{0:." + str(decimals) + "f}").format(
+            100 * (i / float(total)))
+        filled_length = int(length * i // total)
+        bar = fill * filled_length + '-' * (length - filled_length)
+        print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end='\r')
+        # Print New Line on Complete
+        if i == total:
+            print()
+
+    # filter mt to the desired zone on the graph
+    @staticmethod
+    def filter_by_coordinates(mt, gp_range, nlp_range, phenotype):
+        assert (len(gp_range) == 2 and len(nlp_range) == 2)
+
+        ht = mt.filter_cols(mt.phenotype == phenotype).entries()
+        return ht.filter(
+            hl.interval(hl.int64(gp_range[0]), hl.int64(gp_range[1]),
+                        includes_start=True, includes_end=True).contains(
+                ht.global_position) &
+            hl.interval(hl.float64(nlp_range[0]), hl.float64(nlp_range[1]),
+                        includes_start=True, includes_end=True).contains(
+                ht.neg_log_pval)
+        )
+
+    # filter table to have one row (variant) per pixel
+    @staticmethod
+    def filter_by_pixel(ht, gp_range, nlp_range):
+        assert (len(gp_range) == 2 and len(nlp_range) == 2)
+        pixel_coordinates_on_tile = [
+            hl.floor(TileGenerator.map_value_onto_range(ht.neg_log_pval,
+                                                        nlp_range, [0, 256])),
+            hl.floor(TileGenerator.map_value_onto_range(ht.global_position,
+                                                        gp_range, [0, 256]))
+        ]
+        # FIXME : key_by(...).distinct() is slow; use jack's downsampler
+        return ht.annotate(
+            tile_coordinates=pixel_coordinates_on_tile).key_by(
+            'tile_coordinates').distinct()
+
+    # collect global positions, negative log p-values, and colors for matplotlib
+    @staticmethod
+    def collect_values(ht):
+        global_positions = []
+        neg_log_pvals = []
+        colors = []
+        collected = ht.collect()
+        for i in range(0, len(collected)):
+            global_positions.append(collected[i].global_position)
+            neg_log_pvals.append(collected[i].neg_log_pval)
+            colors.append(collected[i].color)
+        return global_positions, neg_log_pvals, colors
+
+    # calculate the global position range for a particular tile
+    def calculate_gp_range(self, column, num_cols):
+        gp_range = self.mt.gp_range.collect()[0]
+        x_axis_range = [gp_range.min, gp_range.max]
+
+        x_graph_min = x_axis_range[0] - self.x_margin
+        x_graph_max = x_axis_range[1] + self.x_margin
+        tile_width = (x_graph_max - x_graph_min) / num_cols
+        min_gp = tile_width * column + x_graph_min
+        max_gp = min_gp + tile_width
+        return [min_gp, max_gp]
+
+    # each phenotype will have its own subdirectory in the self.dest folder
+    def directory_name(self, phenotype, zoom):
+        return self.dest + "/" + str(phenotype) + "/" + str(zoom)
+
+    # logging file to record as tiles are generated (or skipped if empty)
+    def start_log(self, new_log_file, zoom):
+        write_method = 'w' if new_log_file else 'a'
+        self.log = open(self.log_path, write_method)
+        self.log.write("ZOOM "
+                       + self.date()
+                       + ": generating plots for zoom level : "
+                       + str(zoom) + ".\n")
+
+    # flush buffer to the logging file if program is interrupted
+    def catch(self, signum, frame):
+        if self.log is not None:
+            self.log.flush()
+
+    # generate plot and write it to tile_path as a .png
+    @staticmethod
+    def generate_plot(tile_path, xs, ys, colors, x_range, y_range):
+        # figsize=(2.56,2.56) and savefig(dpi=100) => 256 * 256 pixel image
+        fig = plt.figure(figsize=(2.56, 2.56))
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_axis_off()
+        ax.scatter(xs, ys, c=colors, s=4, alpha=0.4)
+        ax.set_ylim(y_range)
+        ax.set_xlim(x_range)
+
+        plt.savefig(tile_path, dpi=100)
+        # plt.show()
+        plt.close()
+
+    # generate a single tile for the given phenotype and ranges of x,y values
+    def generate_tile_image(self, zc, x_range, y_range, tile_path, phenotype):
+        zone = Zone(x_range, y_range)
+
+        if self.empty_zones.contains(zone):
+            # tile will be empty; don't bother filtering table
+            self.log.write("EMPTY " + self.date() + ": empty plot <"
+                           + tile_path + ">.\n")
+            if os.path.exists(tile_path):
+                os.unlink(tile_path)
+            os.symlink(self.empty_tile_path, tile_path)
+            return
+
+        # when filtering by coordinates, should filter slightly outside bounds
+        # of graph, so that there is a smooth transition between tiles
+        # TODO: fine tune how much we need to include outside tile border
+        x_span = x_range[1] - x_range[0]
+        x_filter_range = [x_range[0] - x_span * .1, x_range[1] + x_span * .1]
+        filtered_by_coordinates = self.filter_by_coordinates(self.mt,
+                                                             x_filter_range,
+                                                             y_range,
+                                                             phenotype)
+
+        filtered_by_pixel = self.filter_by_pixel(filtered_by_coordinates,
+                                                 x_range, y_range)
+
+        gp, nlp, colors = self.collect_values(filtered_by_pixel, )
+
+        if not gp:
+            assert not nlp
+            # tile is empty; add to empty list
+            self.empty_zones.append(zone)
+            self.log.write("EMPTY " + self.date() + ": empty plot <"
+                           + tile_path + ">.\n")
+            if os.path.exists(tile_path):
+                os.unlink(tile_path)
+            os.symlink(self.empty_tile_path, tile_path)
+            return
+
+        self.log.write("GEN " + self.date() + ": generated plot <"
+                       + tile_path + ">.\n")
+
+        self.generate_plot(tile_path, gp, nlp, colors, x_range, y_range)
+
+    # generate all tiles for a given phenotype at a particular zoom level
+    # if new_log_file=False, log file will be appended to, not overwritten
+    def generate_tile_layer(self, phenotype, zoom, new_log_file=False):
+        signal.signal(signal.SIGINT, self.catch)
+
+        zoom_directory = self.directory_name(phenotype, zoom)
+
+        if not os.path.exists(zoom_directory):
+            os.makedirs(zoom_directory)
+
+        self.start_log(new_log_file, zoom)
+
+        num_cols = 2 ** zoom
+        iteration = 1
+        for c in range(0, num_cols):
+            x_range = self.calculate_gp_range(c, num_cols)
+
+            pheno_info = self.mt.filter_cols(
+                self.mt.phenotype == phenotype).cols().collect()[0]
+
+            y_axis_range = [pheno_info.min_nlp, pheno_info.max_nlp]
+
+            tile_path = zoom_directory + "/" + str(c) + ".png"
+            if (not os.path.isfile(tile_path)) or self.regen:
+                zc = [zoom, c]
+                self.generate_tile_image(zc, x_range, y_axis_range,
+                                         tile_path, phenotype)
+                self.progress(iteration, num_cols,
+                              prefix='Zoom level: ' + str(zoom))
+
+            iteration = iteration + 1
+        self.log.close()
