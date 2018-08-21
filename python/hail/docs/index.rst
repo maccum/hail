@@ -27,3 +27,21 @@ Indices and tables
 
 
 
+Filter loci by a list of intervals
+----------------------------------
+
+tags:
+.....
+
+.. container:: toggle
+
+    **Explanation**
+
+    .. container:: toggle-content
+
+        Some explanation here.
+
+        .. code-block:: xml
+           :linenos:
+
+               >>> "some code to toggle"
