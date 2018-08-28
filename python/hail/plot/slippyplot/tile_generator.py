@@ -186,11 +186,11 @@ class TileGenerator(object):
         fig = plt.figure(figsize=(2.56, 2.56))
         ax = fig.add_axes([0, 0, 1, 1])
         ax.set_axis_off()
-        ax.scatter(xs, ys, c=colors, s=4, alpha=0.4)
+        ax.scatter(xs, ys, c=colors, s=4)
         ax.set_ylim(y_range)
         ax.set_xlim(x_range)
 
-        plt.savefig(tile_path, dpi=100)
+        plt.savefig(tile_path, dpi=100, transparent=True)
         # plt.show()
         plt.close()
 
@@ -217,10 +217,24 @@ class TileGenerator(object):
                                                              y_range,
                                                              phenotype)
 
-        filtered_by_pixel = self.filter_by_pixel(filtered_by_coordinates,
-                                                 x_range, y_range)
+        # filtered_by_pixel = self.filter_by_pixel(filtered_by_coordinates,
+        #                                         x_range, y_range)
 
-        gp, nlp, colors = self.collect_values(filtered_by_pixel, )
+        # compare with downsampler
+        # fbp_count = filtered_by_pixel.count()
+        downsampled = filtered_by_coordinates.aggregate(
+            hl.agg.downsample(filtered_by_coordinates.global_position,
+                              filtered_by_coordinates.neg_log_pval,
+                              filtered_by_coordinates.color,
+                              n_divisions=256 * 256))
+        # print('fbp count: '+str(fbp_count)+" downsampled count: "+str(len(downsampled)))
+
+        # gp, nlp, colors = self.collect_values(filtered_by_pixel)
+        gp, nlp, colors = [], [], []
+        for i, elem in enumerate(downsampled):
+            gp.append(elem[0])
+            nlp.append(elem[1])
+            colors.append(elem[2][0])
 
         if not gp:
             assert not nlp
@@ -258,7 +272,8 @@ class TileGenerator(object):
             pheno_info = self.mt.filter_cols(
                 self.mt.phenotype == phenotype).cols().collect()[0]
 
-            y_axis_range = [pheno_info.min_nlp, pheno_info.max_nlp]
+            y_axis_range = [pheno_info.min_nlp - self.y_margin,
+                            pheno_info.max_nlp + self.y_margin]
 
             tile_path = zoom_directory + "/" + str(c) + ".png"
             if (not os.path.isfile(tile_path)) or self.regen:
