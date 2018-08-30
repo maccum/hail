@@ -24,7 +24,7 @@ class ManhattanPreprocessor(object):
             '17': "#125b07", '18': "#12e2c3", '19': "#914ae2", '20': "#95ce10",
             '21': "#af1ca8", '22': "#eaca3a", 'X': "#1c8caf"}
 
-    def add_manhattan_data(self, colors=None):
+    def add_manhattan_data(self, colors=None, threshold=.001):
         """
         Annotate the matrix table with data needed for manhattan plotting.
 
@@ -35,6 +35,7 @@ class ManhattanPreprocessor(object):
         * min and max -log(p_value) for each phenotype (y-axis ranges)
 
 
+        :param threshold: p-value threshold for hover data
         :param colors: :class:`dict` of contigs to hex colors
         :return: :class:`.MatrixTable`
         """
@@ -50,7 +51,13 @@ class ManhattanPreprocessor(object):
               .drop('color_dict'))
 
         pval_expr = mt._fields[self.pval_field]
-        mt = (mt.annotate_entries(neg_log_pval=-hl.log(pval_expr))
+        label_expr = hl.array([hl.str(mt.locus),
+                              hl.str(mt.alleles),
+                              mt.gene,
+                              hl.str(pval_expr)])
+        mt = (mt.annotate_entries(neg_log_pval=-hl.log(pval_expr),
+                                  under_threshold=pval_expr < threshold,
+                                  label=label_expr)
               .key_cols_by(self.phenotype_field))
 
         # y-axis range for each phenotype

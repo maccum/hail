@@ -2,6 +2,7 @@ import signal
 import datetime
 import os
 import matplotlib.pyplot as plt
+import json
 
 import hail as hl
 from hail.plot.slippyplot.zone import Zone, Zones
@@ -15,7 +16,7 @@ class TileGenerator(object):
                  empty_tile_path='/Users/maccum/manhattan_data/empty_tile.png',
                  log_path='plot_generation.log',
                  regen=False,
-                 x_margin=10,
+                 x_margin=100000,
                  y_margin=5):
         """
         TileGenerator for tiles (.png images) that compose a plot.
@@ -195,7 +196,8 @@ class TileGenerator(object):
         plt.close()
 
     # generate a single tile for the given phenotype and ranges of x,y values
-    def generate_tile_image(self, zc, x_range, y_range, tile_path, phenotype):
+    def generate_tile_image(self, zc, x_range, y_range, tile_path, phenotype,
+                            json_path, hover_path):
         zone = Zone(x_range, y_range)
 
         if self.empty_zones.contains(zone):
@@ -220,21 +222,40 @@ class TileGenerator(object):
         # filtered_by_pixel = self.filter_by_pixel(filtered_by_coordinates,
         #                                         x_range, y_range)
 
-        # compare with downsampler
-        # fbp_count = filtered_by_pixel.count()
+        metadata = (hl.array([filtered_by_coordinates.color,
+                             hl.str(filtered_by_coordinates.under_threshold)])
+                    .extend(filtered_by_coordinates.label))
         downsampled = filtered_by_coordinates.aggregate(
             hl.agg.downsample(filtered_by_coordinates.global_position,
                               filtered_by_coordinates.neg_log_pval,
-                              filtered_by_coordinates.color,
+                              metadata,
                               n_divisions=256 * 256))
-        # print('fbp count: '+str(fbp_count)+" downsampled count: "+str(len(downsampled)))
 
-        # gp, nlp, colors = self.collect_values(filtered_by_pixel)
         gp, nlp, colors = [], [], []
+        points = []
         for i, elem in enumerate(downsampled):
             gp.append(elem[0])
             nlp.append(elem[1])
-            colors.append(elem[2][0])
+            label = elem[2]
+            colors.append(label[0])
+            if label[1] == "true":
+                # p-value is under threshold (nlp over threshold)
+                points.append({
+                    'gp': elem[0],
+                    'nlp': elem[1],
+                    'label': label[2:]
+                })
+        if points:
+            # write hover data to json file
+            with open(json_path, 'w') as outfile:
+                json.dump(points, outfile)
+            with open(hover_path, 'r') as hover_file:
+                tiles_with_hover_data = json.load(hover_file)
+            with open(hover_path, 'w') as hover_file:
+                tiles_with_hover_data.append(zc[1])
+                #hover_file.write(str(zc[0])+" "+str(zc[1])+'\n')
+                json.dump(tiles_with_hover_data, hover_file)
+
 
         if not gp:
             assert not nlp
@@ -264,24 +285,46 @@ class TileGenerator(object):
 
         self.start_log(new_log_file, zoom)
 
+        pheno_info = self.mt.filter_cols(
+            self.mt.phenotype == phenotype).cols().collect()[0]
+        y_axis_range = [pheno_info.min_nlp - self.y_margin,
+                        pheno_info.max_nlp + self.y_margin]
+
+        # write x and y range bounds to log
+        gp_range = self.mt.gp_range.collect()[0]
+        x_graph_min = gp_range.min - self.x_margin
+        x_graph_max = gp_range.max + self.x_margin
+        self.log.write(
+            "AXIS BOUNDS: x[{},{}] y[{},{}]\n".format(x_graph_min, x_graph_max,
+                                                      y_axis_range[0],
+                                                      y_axis_range[1]))
+
+        metadata_file = open(self.dest+"/"+phenotype+"/"+"metadata.json", 'w')
+        json.dump({'phenotype': phenotype,
+                             'x_axis_range': [x_graph_min, x_graph_max],
+                             'y_axis_range': y_axis_range}, metadata_file)
+        metadata_file.close()
+
+        hover_path = zoom_directory + "/" + "hover.json"
+        with open(hover_path, 'w') as hover_file:
+            json.dump([], hover_file)
+        #hover_file = open(zoom_directory + "/" + "hover.txt", 'w')
+
         num_cols = 2 ** zoom
         iteration = 1
         for c in range(0, num_cols):
             x_range = self.calculate_gp_range(c, num_cols)
 
-            pheno_info = self.mt.filter_cols(
-                self.mt.phenotype == phenotype).cols().collect()[0]
-
-            y_axis_range = [pheno_info.min_nlp - self.y_margin,
-                            pheno_info.max_nlp + self.y_margin]
-
+            json_path = zoom_directory + "/" + str(c) + ".json"
             tile_path = zoom_directory + "/" + str(c) + ".png"
             if (not os.path.isfile(tile_path)) or self.regen:
                 zc = [zoom, c]
                 self.generate_tile_image(zc, x_range, y_axis_range,
-                                         tile_path, phenotype)
+                                         tile_path, phenotype, json_path,
+                                         hover_path)
                 self.progress(iteration, num_cols,
                               prefix='Zoom level: ' + str(zoom))
 
             iteration = iteration + 1
+        hover_file.close()
         self.log.close()
