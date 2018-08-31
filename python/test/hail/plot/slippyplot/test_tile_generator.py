@@ -13,19 +13,20 @@ tearDownModule = stopTestHailContext
 class Tests(unittest.TestCase):
     def setUp(self):
         ht = hl.Table.parallelize([
-            {'locus': '1:904165', 'alleles': ['G', 'A'],
+            {'locus': '1:904165', 'alleles': ['G', 'A'], 'gene': 'A_GENE',
              'phenotype': 'trait1', 'pval': 0.128},
-            {'locus': '1:909917', 'alleles': ['G', 'A'],
+            {'locus': '1:909917', 'alleles': ['G', 'A'], 'gene': 'A_GENE',
              'phenotype': 'trait1', 'pval': 0.766},
         ],
             hl.tstruct(locus=hl.tstr,
                        alleles=hl.tarray(hl.tstr),
+                       gene=hl.tstr,
                        phenotype=hl.tstr,
                        pval=hl.tfloat64)
         )
         ht = ht.annotate(locus=hl.parse_locus(ht.locus))
 
-        self.mt = ht.to_matrix_table(['locus', 'alleles'], ['phenotype'])
+        self.mt = ht.to_matrix_table(['locus', 'alleles'], ['phenotype'], ['gene'])
 
         self.colors = {
             '1': "#08ad4d", '2': "#cc0648", '3': "#bbdd11", '4': "#4a87d6",
@@ -148,7 +149,7 @@ class Tests(unittest.TestCase):
                           '#F73A12'])
 
     def test_generate_tiles(self):
-        # TODO: test actual image output?
+        # TODO: test actual image output in some way?
         mt = (ManhattanPreprocessor(
             self.mt.locus, self.mt.phenotype, self.mt.pval)
               .add_manhattan_data(colors=self.colors))
