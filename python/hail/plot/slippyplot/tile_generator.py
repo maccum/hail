@@ -233,6 +233,7 @@ class TileGenerator(object):
 
         gp, nlp, colors = [], [], []
         points = []
+        # fixme: slow AF to go through labels one by one after agg.downsample
         for i, elem in enumerate(downsampled):
             gp.append(elem[0])
             nlp.append(elem[1])
